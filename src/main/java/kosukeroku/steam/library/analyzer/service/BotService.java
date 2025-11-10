@@ -1,5 +1,6 @@
 package kosukeroku.steam.library.analyzer.service;
 
+import kosukeroku.steam.library.analyzer.dto.GameStats;
 import kosukeroku.steam.library.analyzer.dto.SteamGame;
 import kosukeroku.steam.library.analyzer.exception.SteamApiException;
 import kosukeroku.steam.library.analyzer.exception.SteamPrivateProfileException;
@@ -17,19 +18,23 @@ public class BotService {
 
     private final SteamService steamService;
     private static final String WELCOME_MESSAGE = """
-        👋 Hi! I am Steam Library Analyzer Bot!
-        
-        Send me:
-        • 🔢 Your SteamID (17 digits)
-        • 🔗 Or your unique name from custom URL
-        
-        **Examples:**
-        `76561197960287930` - SteamID64
-        `gabelogannewell` - Custom URL name
-        
-        💡 _To find your Steam ID, click your username in the top right corner of the Steam client or website and select "Account details".
-        💡 To find your custom Steam profile URL, click on your username in the top right, select "Profile" or "View my profile", then click "Edit Profile". Your custom URL is located under the "General" tab._
-        """;
+    👋 *Hi! I am Steam Library Analyzer Bot!*
+    
+    Send me your:
+    • 🔢 SteamID (17 digits) 
+    • 🔗 Or custom profile name
+    
+    I'll show you:
+    📊 Overall game statistics
+    🎮 Top games by playtime
+    
+    *Examples:*
+    `76561197960287930`
+    `gabelogannewell`
+    
+    💡 _To find your Steam ID: Click your username → "Account details"_
+    💡 _To find custom URL: Click your username → "Profile" → "Edit Profile"_
+    """;
 
     public String handleMessage(String message, Long chatId) {
         log.info("Received message from chat {}: {}", chatId, message);
@@ -48,8 +53,14 @@ public class BotService {
     private String processSteamInput(String input) {
         try {
             String resolvedSteamId = steamService.resolveSteamId(input);
+
+            GameStats stats = steamService.getOverallStats(resolvedSteamId);
             List<SteamGame> topGames = steamService.getTopGamesByPlaytime(resolvedSteamId);
-            return steamService.formatTopGamesMessage(topGames, input, resolvedSteamId);
+
+            String statsMessage = steamService.formatStatsMessage(stats, input, resolvedSteamId);
+            String topGamesMessage = steamService.formatTopGamesMessage(topGames);
+
+            return statsMessage + "\n" + topGamesMessage;
 
         } catch (SteamUserNotFoundException e) {
             log.warn("User not found: {}", input);
