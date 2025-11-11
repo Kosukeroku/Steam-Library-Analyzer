@@ -1,5 +1,6 @@
 package kosukeroku.steam.library.analyzer.service;
 
+import kosukeroku.steam.library.analyzer.dto.AchievementStats;
 import kosukeroku.steam.library.analyzer.dto.GameStats;
 import kosukeroku.steam.library.analyzer.dto.SteamGame;
 import kosukeroku.steam.library.analyzer.exception.SteamApiException;
@@ -60,7 +61,10 @@ public class BotService {
             String statsMessage = steamService.formatStatsMessage(stats, input, resolvedSteamId);
             String topGamesMessage = steamService.formatTopGamesMessage(topGames);
 
-            return statsMessage + "\n" + topGamesMessage;
+            AchievementStats achievementStats = steamService.getAchievementStats(resolvedSteamId);
+            String achievementMessage = steamService.formatAchievementMessage(achievementStats);
+
+            return statsMessage + "\n" + topGamesMessage + "\n" + achievementMessage;
 
         } catch (SteamUserNotFoundException e) {
             log.warn("User not found: {}", input);

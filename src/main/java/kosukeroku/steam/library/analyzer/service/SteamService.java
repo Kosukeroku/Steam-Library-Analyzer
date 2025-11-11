@@ -1,10 +1,7 @@
 package kosukeroku.steam.library.analyzer.service;
 
 
-import kosukeroku.steam.library.analyzer.dto.GameStats;
-import kosukeroku.steam.library.analyzer.dto.SteamGame;
-import kosukeroku.steam.library.analyzer.dto.SteamOwnedGamesResponse;
-import kosukeroku.steam.library.analyzer.dto.SteamVanityResponse;
+import kosukeroku.steam.library.analyzer.dto.*;
 import kosukeroku.steam.library.analyzer.exception.SteamApiException;
 import kosukeroku.steam.library.analyzer.exception.SteamPrivateProfileException;
 import kosukeroku.steam.library.analyzer.exception.SteamUserNotFoundException;
@@ -13,6 +10,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.WebClient;
 
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
 import java.util.stream.Collectors;
@@ -196,6 +194,152 @@ public class SteamService {
         }
 
         return message.toString();
+    }
+
+    public AchievementStats getAchievementStats(String steamId) {
+        log.info("Calculating achievement stats for SteamID: {}", steamId);
+
+        SteamOwnedGamesResponse response = getGamesResponse(steamId);
+        List<SteamGame> games = response.response().games();
+
+        List<SteamGame> playedGames = games.stream()
+                .filter(game -> game.playtime() > 0)
+                .collect(Collectors.toList());
+
+        log.info("Processing {} played games for achievements", playedGames.size());
+
+        // checking if achievements are hidden by testing the first game for 403 response (steam api returns 200 for success, 400 for games w/o achievements, 403 for hidden profiles
+        if (!playedGames.isEmpty()) {
+            SteamGame firstGame = playedGames.get(0);
+            try {
+                SteamAchievementsResponse testResponse = webClient.get()
+                        .uri(uriBuilder -> uriBuilder
+                                .path("/ISteamUserStats/GetPlayerAchievements/v1/")
+                                .queryParam("key", steamApiKey)
+                                .queryParam("steamid", steamId)
+                                .queryParam("appid", firstGame.appId().toString())
+                                .queryParam("l", "english")
+                                .build())
+                        .retrieve()
+                        .bodyToMono(SteamAchievementsResponse.class)
+                        .block();
+
+            } catch (Exception e) {
+                // if we got 403, this profile has hidden achievements
+                if (e.getMessage() != null && e.getMessage().contains("403")) {
+                    log.warn("Profile is hidden - 403 Forbidden for appId: {}", firstGame.appId());
+                    return new AchievementStats(0, 0, 0, 0, 0, true);
+                }
+                // other errors (like 400) we ignore and continue our calculations
+            }
+        }
+
+        List<AchievementData> achievementData = playedGames.parallelStream()
+                .map(game -> getAchievementData(steamId, game))
+                .filter(data -> data.totalAchievements > 0)
+                .collect(Collectors.toList());
+
+        int totalAchievements = achievementData.stream().mapToInt(AchievementData::totalAchievements).sum();
+        int completedAchievements = achievementData.stream().mapToInt(AchievementData::completedAchievements).sum();
+        int perfectGames = (int) achievementData.stream().filter(AchievementData::isPerfect).count();
+        int gamesWithAchievements = achievementData.size();
+
+        double completionPercentage = totalAchievements > 0 ?
+                (double) completedAchievements / totalAchievements * 100 : 0;
+
+        double totalCompletionPercent = achievementData.stream()
+                .mapToDouble(data -> (double) data.completedAchievements() / data.totalAchievements() * 100)
+                .sum();
+
+        double averageCompletion = gamesWithAchievements > 0 ?
+                totalCompletionPercent / gamesWithAchievements : 0;
+
+        log.info("Found {} games with achievements", gamesWithAchievements);
+
+        return new AchievementStats(
+                totalAchievements,
+                completedAchievements,
+                completionPercentage,
+                perfectGames,
+                averageCompletion,
+                false
+        );
+    }
+
+    // utility record...
+    private record AchievementData(int totalAchievements, int completedAchievements, boolean isPerfect) {}
+
+    // ...and utility methods for extracting achievement data from games
+    private AchievementData getAchievementData(String steamId, SteamGame game) {
+        List<SteamAchievementsResponse.GameAchievement> achievements =
+                getGameAchievements(steamId, game.appId().toString());
+
+        if (!achievements.isEmpty()) {
+            int total = achievements.size();
+            long completed = achievements.stream()
+                    .filter(SteamAchievementsResponse.GameAchievement::isAchieved)
+                    .count();
+
+            return new AchievementData(total, (int) completed, completed == total);
+        }
+
+        return new AchievementData(0, 0, false);
+    }
+
+    private List<SteamAchievementsResponse.GameAchievement> getGameAchievements(String steamId, String appId) {
+        try {
+
+            SteamAchievementsResponse response = webClient.get()
+                    .uri(uriBuilder -> uriBuilder
+                            .path("/ISteamUserStats/GetPlayerAchievements/v1/")
+                            .queryParam("key", steamApiKey)
+                            .queryParam("steamid", steamId)
+                            .queryParam("appid", appId)
+                            .queryParam("l", "english")
+                            .build())
+                    .retrieve()
+                    .bodyToMono(SteamAchievementsResponse.class)
+                    .block();
+
+            if (response != null &&
+                    response.playerstats() != null &&
+                    Boolean.TRUE.equals(response.playerstats().success()) &&
+                    response.playerstats().achievements() != null) {
+                return response.playerstats().achievements();
+            }
+
+        } catch (Exception e) {
+            log.debug("No achievements for appId {}: {}", appId, e.getMessage());
+        }
+        return Collections.emptyList();
+    }
+
+    public String formatAchievementMessage(AchievementStats stats) {
+        if (stats.hidden()) {
+            return """
+            🏆 *Achievement Overview:*
+            
+            🔒 Achievement data is hidden
+            • Make sure your *Game Details* are set to *Public*
+            
+            💡 _How to fix:
+            Steam → Settings → Privacy → Game Details → Public_
+            """;
+        }
+
+        return String.format("""
+        🏆 *Achievement Overview:*
+        
+        • Total achievements: %,d/%,d (%.1f%%)
+        • Perfect games: %,d
+        • Average completion per game: %.1f%%
+        """,
+                stats.completedAchievements(),
+                stats.totalAchievements(),
+                stats.completionPercentage(),
+                stats.perfectGames(),
+                stats.averageCompletion()
+        );
     }
 }
 
