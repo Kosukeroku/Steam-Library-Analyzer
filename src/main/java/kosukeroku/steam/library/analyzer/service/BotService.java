@@ -18,6 +18,7 @@ import java.util.List;
 public class BotService {
 
     private final SteamService steamService;
+    private static final String LINE_SEPARATOR = "-----------------------------------------------------------------------------------";
     private static final String WELCOME_MESSAGE = """
     👋 *Hi! I am Steam Library Analyzer Bot!*
     
@@ -28,6 +29,7 @@ public class BotService {
     I'll show you:
     📊 Overall game statistics
     🎮 Top games by playtime
+    🏆 Achievement progress
     
     *Examples:*
     `76561197960287930`
@@ -64,7 +66,7 @@ public class BotService {
             AchievementStats achievementStats = steamService.getAchievementStats(resolvedSteamId);
             String achievementMessage = steamService.formatAchievementMessage(achievementStats);
 
-            return statsMessage + "\n" + topGamesMessage + "\n" + achievementMessage;
+            return statsMessage + LINE_SEPARATOR + "\n" + topGamesMessage + LINE_SEPARATOR + "\n" + achievementMessage;
 
         } catch (SteamUserNotFoundException e) {
             log.warn("User not found: {}", input);

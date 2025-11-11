@@ -170,7 +170,6 @@ public class SteamService {
                 .limit(GAMES_IN_OUTPUT)
                 .collect(Collectors.toList());
 
-        log.info("Found {} games after filtering", filteredGames.size());
         return filteredGames;
 
     }
@@ -208,7 +207,7 @@ public class SteamService {
 
         log.info("Processing {} played games for achievements", playedGames.size());
 
-        // checking if achievements are hidden by testing the first game for 403 response (steam api returns 200 for success, 400 for games w/o achievements, 403 for hidden profiles
+        // checking if achievements are hidden by testing the first game for 403 response
         if (!playedGames.isEmpty()) {
             SteamGame firstGame = playedGames.get(0);
             try {
@@ -225,18 +224,24 @@ public class SteamService {
                         .block();
 
             } catch (Exception e) {
-                // if we got 403, this profile has hidden achievements
                 if (e.getMessage() != null && e.getMessage().contains("403")) {
                     log.warn("Profile is hidden - 403 Forbidden for appId: {}", firstGame.appId());
-                    return new AchievementStats(0, 0, 0, 0, 0, true);
+                    return new AchievementStats(0, 0, 0, 0, 0, true, Collections.emptyList());
                 }
-                // other errors (like 400) we ignore and continue our calculations
             }
         }
 
         List<AchievementData> achievementData = playedGames.parallelStream()
                 .map(game -> getAchievementData(steamId, game))
                 .filter(data -> data.totalAchievements > 0)
+                .collect(Collectors.toList());
+
+        // sorting by completion percentage
+        List<AchievementData> topByProgress = achievementData.stream()
+                .sorted(Comparator.comparingDouble((AchievementData data) ->
+                                (double) data.completedAchievements() / data.totalAchievements() * 100)
+                        .reversed())
+                .limit(GAMES_IN_OUTPUT)
                 .collect(Collectors.toList());
 
         int totalAchievements = achievementData.stream().mapToInt(AchievementData::totalAchievements).sum();
@@ -262,12 +267,13 @@ public class SteamService {
                 completionPercentage,
                 perfectGames,
                 averageCompletion,
-                false
+                false,
+                topByProgress
         );
     }
 
     // utility record...
-    private record AchievementData(int totalAchievements, int completedAchievements, boolean isPerfect) {}
+    public record AchievementData(String gameName, int totalAchievements, int completedAchievements, boolean isPerfect) {}
 
     // ...and utility methods for extracting achievement data from games
     private AchievementData getAchievementData(String steamId, SteamGame game) {
@@ -280,10 +286,10 @@ public class SteamService {
                     .filter(SteamAchievementsResponse.GameAchievement::isAchieved)
                     .count();
 
-            return new AchievementData(total, (int) completed, completed == total);
+            return new AchievementData(game.name(), total, (int) completed, completed == total);
         }
 
-        return new AchievementData(0, 0, false);
+        return new AchievementData(game.name(), 0, 0, false);
     }
 
     private List<SteamAchievementsResponse.GameAchievement> getGameAchievements(String steamId, String appId) {
@@ -317,20 +323,22 @@ public class SteamService {
     public String formatAchievementMessage(AchievementStats stats) {
         if (stats.hidden()) {
             return """
-            🏆 *Achievement Overview:*
-            
-            🔒 Achievement data is hidden
-            • Make sure your *Game Details* are set to *Public*
-            
-            💡 _How to fix:
-            Steam → Settings → Privacy → Game Details → Public_
-            """;
-        }
-
-        return String.format("""
         🏆 *Achievement Overview:*
         
-        • Total achievements: %,d/%,d (%.1f%%)
+        🔒 Achievement data is hidden
+        • Make sure your *Game Details* are set to *Public*
+        
+        💡 _How to fix:
+        Steam → Settings → Privacy → Game Details → Public_
+        """;
+        }
+
+        StringBuilder message = new StringBuilder();
+
+        message.append(String.format("""
+        🏆 *Achievement Overview:*
+        
+        • Total achievements (out of all possible): %,d/%,d (%.1f%%)
         • Perfect games: %,d
         • Average completion per game: %.1f%%
         """,
@@ -339,7 +347,26 @@ public class SteamService {
                 stats.completionPercentage(),
                 stats.perfectGames(),
                 stats.averageCompletion()
-        );
+        ));
+
+        if (!stats.topGamesByProgress().isEmpty()) {
+            message.append("\n🎯 *Top Games by Achievement Progress:*\n\n");
+
+            for (int i = 0; i < stats.topGamesByProgress().size(); i++) {
+                AchievementData data = stats.topGamesByProgress().get(i);
+                double percentage = (double) data.completedAchievements() / data.totalAchievements() * 100;
+                message.append(String.format(
+                        "*%d.* %s – %,d/%,d (%.0f%%)\n",
+                        i + 1,
+                        data.gameName(),
+                        data.completedAchievements(),
+                        data.totalAchievements(),
+                        percentage
+                ));
+            }
+        }
+
+        return message.toString();
     }
 }
 
