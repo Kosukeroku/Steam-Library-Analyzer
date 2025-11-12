@@ -56,14 +56,15 @@ public class BotService {
     private String processSteamInput(String input) {
         try {
             String resolvedSteamId = steamService.resolveSteamId(input);
+            List<SteamGame> games = steamService.getGames(resolvedSteamId);
 
-            GameStats stats = steamService.getOverallStats(resolvedSteamId);
-            List<SteamGame> topGames = steamService.getTopGamesByPlaytime(resolvedSteamId);
+
+            GameStats stats = steamService.getOverallStats(games);
+            List<SteamGame> topGames = steamService.getTopGamesByPlaytime(games);
+            AchievementStats achievementStats = steamService.getAchievementStats(resolvedSteamId);
 
             String statsMessage = steamService.formatStatsMessage(stats, input, resolvedSteamId);
             String topGamesMessage = steamService.formatTopGamesMessage(topGames);
-
-            AchievementStats achievementStats = steamService.getAchievementStats(resolvedSteamId);
             String achievementMessage = steamService.formatAchievementMessage(achievementStats);
 
             return statsMessage + LINE_SEPARATOR + "\n" + topGamesMessage + LINE_SEPARATOR + "\n" + achievementMessage;

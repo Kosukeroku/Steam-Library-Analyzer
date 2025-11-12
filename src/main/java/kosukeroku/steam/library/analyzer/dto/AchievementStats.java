@@ -11,5 +11,6 @@ public record AchievementStats(
         int perfectGames,
         double averageCompletion,
         boolean hidden, // whether achievement stats are hidden
-        List<SteamService.AchievementData> topGamesByProgress
+        List<SteamService.AchievementData> topGamesByProgress,
+        List<SteamService.RecentAchievement> recentAchievements
 ) {}

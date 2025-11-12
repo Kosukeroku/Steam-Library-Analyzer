@@ -24,6 +24,7 @@ public class SteamService {
     private static final int VANITY_SUCCESS = 1; // returned code if vanity url was successfully found
     private static final int VANITY_NOT_FOUND = 42; // returned code if vanity url was not found
     private static final int GAMES_IN_OUTPUT = 5;
+    private static final int ACHIEVEMENTS_IN_OUTPUT = 3;
     private static final int MINUTES_IN_HOUR = 60;
 
     @Value("${steam.api.key:}")
@@ -77,12 +78,15 @@ public class SteamService {
         }
     }
 
-    // gets basic overall stats for an account
-    public GameStats getOverallStats(String steamId) {
-        log.info("Calculating overall stats for SteamID: {}", steamId);
-
+    public List<SteamGame> getGames(String steamId) {
         SteamOwnedGamesResponse response = getGamesResponse(steamId);
-        List<SteamGame> games = response.response().games();
+        return response.response().games();
+    }
+
+    // gets basic overall stats for an account
+    public GameStats getOverallStats(List<SteamGame> games) {
+        log.info("Calculating overall stats {} games", games.size());
+
 
         // calculating stats
         int totalGames = games.size();
@@ -158,19 +162,14 @@ public class SteamService {
         return message.toString();
     }
 
-    public List<SteamGame> getTopGamesByPlaytime(String steamId) {
-        log.info("Getting top games for SteamID: {}", steamId);
+    public List<SteamGame> getTopGamesByPlaytime(List<SteamGame> games) {
+        log.info("Getting top games from {} total games", games.size());
 
-        SteamOwnedGamesResponse response = getGamesResponse(steamId);
-        List<SteamGame> games = response.response().games();
-
-        List<SteamGame> filteredGames = games.stream()
+        return games.stream()
                 .filter(game -> game.playtime() > 0 && game.name() != null)
                 .sorted(Comparator.comparing(SteamGame::playtime).reversed())
                 .limit(GAMES_IN_OUTPUT)
                 .collect(Collectors.toList());
-
-        return filteredGames;
 
     }
 
@@ -226,7 +225,7 @@ public class SteamService {
             } catch (Exception e) {
                 if (e.getMessage() != null && e.getMessage().contains("403")) {
                     log.warn("Profile is hidden - 403 Forbidden for appId: {}", firstGame.appId());
-                    return new AchievementStats(0, 0, 0, 0, 0, true, Collections.emptyList());
+                    return new AchievementStats(0, 0, 0, 0, 0, true, Collections.emptyList(), Collections.emptyList());
                 }
             }
         }
@@ -242,6 +241,20 @@ public class SteamService {
                                 (double) data.completedAchievements() / data.totalAchievements() * 100)
                         .reversed())
                 .limit(GAMES_IN_OUTPUT)
+                .collect(Collectors.toList());
+
+        // getting recent achievements
+        List<RecentAchievement> recentAchievements = achievementData.parallelStream()
+                .flatMap(data -> data.allAchievements().stream()
+                        .filter(SteamAchievementsResponse.GameAchievement::isAchieved)
+                        .map(achievement -> new RecentAchievement(
+                                achievement.name(),
+                                data.gameName(),
+                                achievement.unlockTime()
+                        ))
+                )
+                .sorted(Comparator.comparingLong(RecentAchievement::unlockTime).reversed())
+                .limit(ACHIEVEMENTS_IN_OUTPUT)
                 .collect(Collectors.toList());
 
         int totalAchievements = achievementData.stream().mapToInt(AchievementData::totalAchievements).sum();
@@ -261,6 +274,8 @@ public class SteamService {
 
         log.info("Found {} games with achievements", gamesWithAchievements);
 
+
+
         return new AchievementStats(
                 totalAchievements,
                 completedAchievements,
@@ -268,12 +283,15 @@ public class SteamService {
                 perfectGames,
                 averageCompletion,
                 false,
-                topByProgress
+                topByProgress,
+                recentAchievements
         );
     }
 
-    // utility record...
-    public record AchievementData(String gameName, int totalAchievements, int completedAchievements, boolean isPerfect) {}
+    // utility records...
+    public record AchievementData(String gameName, int totalAchievements, int completedAchievements, boolean isPerfect, List<SteamAchievementsResponse.GameAchievement> allAchievements) {}
+
+    public record RecentAchievement(String achievementName, String gameName, Long unlockTime) {}
 
     // ...and utility methods for extracting achievement data from games
     private AchievementData getAchievementData(String steamId, SteamGame game) {
@@ -286,10 +304,10 @@ public class SteamService {
                     .filter(SteamAchievementsResponse.GameAchievement::isAchieved)
                     .count();
 
-            return new AchievementData(game.name(), total, (int) completed, completed == total);
+            return new AchievementData(game.name(), total, (int) completed, completed == total, achievements);
         }
 
-        return new AchievementData(game.name(), 0, 0, false);
+        return new AchievementData(game.name(), 0, 0, false, Collections.emptyList());
     }
 
     private List<SteamAchievementsResponse.GameAchievement> getGameAchievements(String steamId, String appId) {
@@ -349,6 +367,7 @@ public class SteamService {
                 stats.averageCompletion()
         ));
 
+        // top by progress
         if (!stats.topGamesByProgress().isEmpty()) {
             message.append("\n🎯 *Top Games by Achievement Progress:*\n\n");
 
@@ -366,7 +385,52 @@ public class SteamService {
             }
         }
 
+        // most recent
+        if (!stats.recentAchievements().isEmpty()) {
+            message.append("\n🆕 *Recently Unlocked:*\n\n");
+
+            for (RecentAchievement achievement : stats.recentAchievements()) {
+                String timeAgo = convertToTimeAgo(achievement.unlockTime());
+                message.append(String.format("• %s – %s (%s)\n",
+                        achievement.achievementName(),
+                        achievement.gameName(),
+                        timeAgo
+                ));
+            }
+        }
+
         return message.toString();
+    }
+
+    // converts achievements' unlock time into "[n] [unit(s)] ago"
+    private String convertToTimeAgo(Long unlockTime) {
+        if (unlockTime == null) return "unknown";
+
+        long diffSeconds = (System.currentTimeMillis() / 1000) - unlockTime;
+
+        if (diffSeconds < 60) return "just now";
+
+        String unit;
+        long value;
+
+        if (diffSeconds < 3600) {
+            value = diffSeconds / 60;
+            unit = "minute";
+        } else if (diffSeconds < 86400) {
+            value = diffSeconds / 3600;
+            unit = "hour";
+        } else if (diffSeconds < 2592000) {
+            value = diffSeconds / 86400;
+            unit = "day";
+        } else if (diffSeconds < 31536000) {
+            value = diffSeconds / 2592000;
+            unit = "month";
+        } else {
+            value = diffSeconds / 31536000;
+            unit = "year";
+        }
+
+        return value + " " + unit + (value > 1 ? "s" : "") + " ago";
     }
 }
 
