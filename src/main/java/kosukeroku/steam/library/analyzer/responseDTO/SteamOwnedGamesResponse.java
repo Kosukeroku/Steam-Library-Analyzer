@@ -1,6 +1,8 @@
-package kosukeroku.steam.library.analyzer.dto;
+package kosukeroku.steam.library.analyzer.responseDTO;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
+import kosukeroku.steam.library.analyzer.modelDTO.SteamGame;
+
 import java.util.List;
 
 public record SteamOwnedGamesResponse(

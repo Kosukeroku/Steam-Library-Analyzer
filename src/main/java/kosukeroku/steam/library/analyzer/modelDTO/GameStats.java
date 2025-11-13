@@ -1,4 +1,4 @@
-package kosukeroku.steam.library.analyzer.dto;
+package kosukeroku.steam.library.analyzer.modelDTO;
 
 public record GameStats(
         int totalGames,

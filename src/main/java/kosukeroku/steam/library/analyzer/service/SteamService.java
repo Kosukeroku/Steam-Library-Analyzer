@@ -1,18 +1,20 @@
 package kosukeroku.steam.library.analyzer.service;
 
 
-import kosukeroku.steam.library.analyzer.dto.*;
+import kosukeroku.steam.library.analyzer.modelDTO.FriendGameStats;
+import kosukeroku.steam.library.analyzer.responseDTO.*;
 import kosukeroku.steam.library.analyzer.exception.SteamApiException;
 import kosukeroku.steam.library.analyzer.exception.SteamPrivateProfileException;
 import kosukeroku.steam.library.analyzer.exception.SteamUserNotFoundException;
+import kosukeroku.steam.library.analyzer.modelDTO.AchievementStats;
+import kosukeroku.steam.library.analyzer.modelDTO.GameStats;
+import kosukeroku.steam.library.analyzer.modelDTO.SteamGame;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.WebClient;
 
-import java.util.Collections;
-import java.util.Comparator;
-import java.util.List;
+import java.util.*;
 import java.util.stream.Collectors;
 
 @Slf4j
@@ -25,7 +27,6 @@ public class SteamService {
     private static final int VANITY_NOT_FOUND = 42; // returned code if vanity url was not found
     private static final int GAMES_IN_OUTPUT = 5;
     private static final int ACHIEVEMENTS_IN_OUTPUT = 3;
-    private static final int MINUTES_IN_HOUR = 60;
 
     @Value("${steam.api.key:}")
     private String steamApiKey;
@@ -98,7 +99,7 @@ public class SteamService {
                 .count();
         int neverPlayedGames = totalGames - playedGames;
 
-        double totalPlaytimeHours = totalPlaytimeMinutes / (double) MINUTES_IN_HOUR;
+        double totalPlaytimeHours = totalPlaytimeMinutes / (double) 60;
         double averagePlaytimeHours = playedGames > 0 ? totalPlaytimeHours / playedGames : 0;
         double neverPlayedPercentage = totalGames > 0 ? (neverPlayedGames * 100.0) / totalGames : 0;
 
@@ -180,8 +181,8 @@ public class SteamService {
 
         for (int i = 0; i < topGames.size(); i++) {
             SteamGame game = topGames.get(i);
-            int hours = game.playtime() / MINUTES_IN_HOUR;
-            int minutes = game.playtime() % MINUTES_IN_HOUR;
+            int hours = game.playtime() / 60;
+            int minutes = game.playtime() % 60;
 
             String timeString = hours > 0 ?
                     String.format("%d h %d min", hours, minutes) :
@@ -192,6 +193,56 @@ public class SteamService {
         }
 
         return message.toString();
+    }
+
+    // utility records...
+    public record AchievementData(String gameName, int totalAchievements, int completedAchievements, boolean isPerfect, List<SteamAchievementsResponse.GameAchievement> allAchievements) {}
+
+    public record RecentAchievement(String achievementName, String gameName, Long unlockTime) {}
+
+    // ...and utility methods for extracting achievement data from games
+    private AchievementData getAchievementData(String steamId, SteamGame game) {
+        List<SteamAchievementsResponse.GameAchievement> achievements =
+                getGameAchievements(steamId, game.appId().toString());
+
+        if (!achievements.isEmpty()) {
+            int total = achievements.size();
+            long completed = achievements.stream()
+                    .filter(SteamAchievementsResponse.GameAchievement::isAchieved)
+                    .count();
+
+            return new AchievementData(game.name(), total, (int) completed, completed == total, achievements);
+        }
+
+        return new AchievementData(game.name(), 0, 0, false, Collections.emptyList());
+    }
+
+    private List<SteamAchievementsResponse.GameAchievement> getGameAchievements(String steamId, String appId) {
+        try {
+
+            SteamAchievementsResponse response = webClient.get()
+                    .uri(uriBuilder -> uriBuilder
+                            .path("/ISteamUserStats/GetPlayerAchievements/v1/")
+                            .queryParam("key", steamApiKey)
+                            .queryParam("steamid", steamId)
+                            .queryParam("appid", appId)
+                            .queryParam("l", "english")
+                            .build())
+                    .retrieve()
+                    .bodyToMono(SteamAchievementsResponse.class)
+                    .block();
+
+            if (response != null &&
+                    response.playerstats() != null &&
+                    Boolean.TRUE.equals(response.playerstats().success()) &&
+                    response.playerstats().achievements() != null) {
+                return response.playerstats().achievements();
+            }
+
+        } catch (Exception e) {
+            log.debug("No achievements for appId {}: {}", appId, e.getMessage());
+        }
+        return Collections.emptyList();
     }
 
     public AchievementStats getAchievementStats(String steamId) {
@@ -288,55 +339,7 @@ public class SteamService {
         );
     }
 
-    // utility records...
-    public record AchievementData(String gameName, int totalAchievements, int completedAchievements, boolean isPerfect, List<SteamAchievementsResponse.GameAchievement> allAchievements) {}
 
-    public record RecentAchievement(String achievementName, String gameName, Long unlockTime) {}
-
-    // ...and utility methods for extracting achievement data from games
-    private AchievementData getAchievementData(String steamId, SteamGame game) {
-        List<SteamAchievementsResponse.GameAchievement> achievements =
-                getGameAchievements(steamId, game.appId().toString());
-
-        if (!achievements.isEmpty()) {
-            int total = achievements.size();
-            long completed = achievements.stream()
-                    .filter(SteamAchievementsResponse.GameAchievement::isAchieved)
-                    .count();
-
-            return new AchievementData(game.name(), total, (int) completed, completed == total, achievements);
-        }
-
-        return new AchievementData(game.name(), 0, 0, false, Collections.emptyList());
-    }
-
-    private List<SteamAchievementsResponse.GameAchievement> getGameAchievements(String steamId, String appId) {
-        try {
-
-            SteamAchievementsResponse response = webClient.get()
-                    .uri(uriBuilder -> uriBuilder
-                            .path("/ISteamUserStats/GetPlayerAchievements/v1/")
-                            .queryParam("key", steamApiKey)
-                            .queryParam("steamid", steamId)
-                            .queryParam("appid", appId)
-                            .queryParam("l", "english")
-                            .build())
-                    .retrieve()
-                    .bodyToMono(SteamAchievementsResponse.class)
-                    .block();
-
-            if (response != null &&
-                    response.playerstats() != null &&
-                    Boolean.TRUE.equals(response.playerstats().success()) &&
-                    response.playerstats().achievements() != null) {
-                return response.playerstats().achievements();
-            }
-
-        } catch (Exception e) {
-            log.debug("No achievements for appId {}: {}", appId, e.getMessage());
-        }
-        return Collections.emptyList();
-    }
 
     public String formatAchievementMessage(AchievementStats stats) {
         if (stats.hidden()) {
@@ -431,6 +434,161 @@ public class SteamService {
         }
 
         return value + " " + unit + (value > 1 ? "s" : "") + " ago";
+    }
+
+    // utility record for aggregating friends' stats by game
+    private record GameAggregate(String gameName, int friendCount, int totalPlaytime) {}
+
+    // and utility method for getting friends' id
+    private List<String> getFriendIds(String steamId) {
+        log.info("Fetching friends' SteamIDs for Steam ID: {}", steamId);
+        try {
+            SteamFriendsResponse response = webClient.get()
+                    .uri(uriBuilder -> uriBuilder
+                            .path("/ISteamUser/GetFriendList/v1/")
+                            .queryParam("key", steamApiKey)
+                            .queryParam("steamid", steamId)
+                            .queryParam("relationship", "friend")
+                            .build())
+                    .retrieve()
+                    .bodyToMono(SteamFriendsResponse.class)
+                    .block();
+
+            if (response != null && response.friendslist() != null && response.friendslist().friends() != null) {
+                return response.friendslist().friends().stream()
+                        .map(SteamFriendsResponse.Friend::steamId)
+                        .collect(Collectors.toList());
+            }
+        } catch (Exception e) {
+            // 401 means friend list is hidden, in that case we return null
+            if (e.getMessage() != null && e.getMessage().contains("401")) {
+                log.warn("Friends list is hidden for {}: 401 Unauthorized", steamId);
+                return null;
+            }
+            log.warn("Could not fetch friends list for {}: {}", steamId, e.getMessage());
+        }
+        return Collections.emptyList();
+    }
+
+
+
+
+
+
+    public List<FriendGameStats> getPopularGamesAmongFriends(String steamId) {
+        log.info("Getting popular games among friends for SteamID: {}", steamId);
+
+        // getting a friend list
+        List<String> friendIds = getFriendIds(steamId);
+
+        // if we got null from our utility method, the user has his friend list hidden
+        if (friendIds == null) {
+            log.info("Friends list is hidden for user: {}", steamId);
+
+            // in which case we return a list of one element with the hidden field set to true
+            return List.of(new FriendGameStats("", 0L, 0, 0, 0, true));
+        }
+
+        if (friendIds.isEmpty()) {
+            log.info("No friends found for user: {}", steamId);
+            return Collections.emptyList();
+        }
+
+        log.info("Found {} friends, analyzing their libraries", friendIds.size());
+
+        // collecting friends' stats
+        Map<Long, GameAggregate> gameStats = new HashMap<>();
+
+        friendIds.parallelStream().forEach(friendId -> {
+            try {
+                List<SteamGame> friendGames = getGames(friendId);
+
+                // updating aggregated stats for every friend's game
+                friendGames.forEach(game -> {
+                    gameStats.compute(game.appId(), (appId, aggregate) -> {
+
+                        // if we don't have stats for this game yet, we create it
+                        if (aggregate == null) {
+                            return new GameAggregate(game.name(), 1, game.playtime());
+                        }
+
+                        // otherwise we update the stats by increasing the friend count by one and total playtime by this friend's playtime
+                        return new GameAggregate(
+                                aggregate.gameName(),
+                                aggregate.friendCount() + 1,
+                                aggregate.totalPlaytime() + game.playtime()
+                        );
+                    });
+                });
+            } catch (Exception e) {
+                log.debug("Could not fetch games for friend {}. Reason: {}", friendId, e.getMessage());
+            }
+        });
+
+        // sorting
+        return gameStats.entrySet().stream()
+                .map(entry -> {
+                    GameAggregate agg = entry.getValue();
+                    double avgHours = agg.totalPlaytime() / (double) agg.friendCount() / 60;
+                    return new FriendGameStats(
+                            agg.gameName(),
+                            entry.getKey(),
+                            agg.friendCount(),
+                            avgHours,
+                            agg.totalPlaytime() / 60,
+                            false
+                    );
+                })
+                .sorted((s1, s2) -> {
+                    int compare = s2.friendCount() - s1.friendCount();
+                    if (compare != 0) {
+                        return compare;
+                    }
+                    return Double.compare(s2.avgPlaytimeHours(), s1.avgPlaytimeHours());
+
+                })
+                .limit(GAMES_IN_OUTPUT)
+                .collect(Collectors.toList());
+    }
+
+    public String formatFriendGamesMessage(List<FriendGameStats> friendGames) {
+
+        // if the friend list is hidden, then the list that this method accepts will only have one element, so we can
+        // get the first element and check the value of its 'hidden' field
+        boolean isFriendsHidden = !friendGames.isEmpty() && friendGames.get(0).hidden();
+
+        if (isFriendsHidden) {
+            return """
+        👥 *Friends Overview:*
+        
+        🔒 Friends list is hidden
+        • Make sure your *Friends List* is set to *Public*
+        
+        💡 _How to fix:
+        Steam → Profile → Edit Profile → Privacy Settings → Friends List → Public_
+        """;
+        }
+
+
+        if (friendGames.isEmpty()) {
+            return "";
+        }
+
+        StringBuilder message = new StringBuilder();
+        message.append("👥 *Popular Among Friends:*\n\n");
+
+        for (int i = 0; i < friendGames.size(); i++) {
+            FriendGameStats stats = friendGames.get(i);
+            message.append(String.format(
+                    "*%d.* %s - %d friends, %.0f avg hours\n",
+                    i + 1,
+                    stats.gameName(),
+                    stats.friendCount(),
+                    stats.avgPlaytimeHours()
+            ));
+        }
+
+        return message.toString();
     }
 }
 

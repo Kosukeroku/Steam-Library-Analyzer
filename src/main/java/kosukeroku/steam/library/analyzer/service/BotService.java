@@ -1,8 +1,9 @@
 package kosukeroku.steam.library.analyzer.service;
 
-import kosukeroku.steam.library.analyzer.dto.AchievementStats;
-import kosukeroku.steam.library.analyzer.dto.GameStats;
-import kosukeroku.steam.library.analyzer.dto.SteamGame;
+import kosukeroku.steam.library.analyzer.modelDTO.AchievementStats;
+import kosukeroku.steam.library.analyzer.modelDTO.FriendGameStats;
+import kosukeroku.steam.library.analyzer.modelDTO.GameStats;
+import kosukeroku.steam.library.analyzer.modelDTO.SteamGame;
 import kosukeroku.steam.library.analyzer.exception.SteamApiException;
 import kosukeroku.steam.library.analyzer.exception.SteamPrivateProfileException;
 import kosukeroku.steam.library.analyzer.exception.SteamUserNotFoundException;
@@ -62,12 +63,14 @@ public class BotService {
             GameStats stats = steamService.getOverallStats(games);
             List<SteamGame> topGames = steamService.getTopGamesByPlaytime(games);
             AchievementStats achievementStats = steamService.getAchievementStats(resolvedSteamId);
+            List<FriendGameStats> friendGames = steamService.getPopularGamesAmongFriends(resolvedSteamId);
 
             String statsMessage = steamService.formatStatsMessage(stats, input, resolvedSteamId);
             String topGamesMessage = steamService.formatTopGamesMessage(topGames);
             String achievementMessage = steamService.formatAchievementMessage(achievementStats);
+            String friendGamesMessage = steamService.formatFriendGamesMessage(friendGames);
 
-            return statsMessage + LINE_SEPARATOR + "\n" + topGamesMessage + LINE_SEPARATOR + "\n" + achievementMessage;
+            return statsMessage + LINE_SEPARATOR + "\n" + topGamesMessage + LINE_SEPARATOR + "\n" + achievementMessage + LINE_SEPARATOR + "\n" + friendGamesMessage;
 
         } catch (SteamUserNotFoundException e) {
             log.warn("User not found: {}", input);

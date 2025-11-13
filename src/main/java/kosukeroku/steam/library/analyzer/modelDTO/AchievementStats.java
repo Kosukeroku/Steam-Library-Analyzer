@@ -1,4 +1,4 @@
-package kosukeroku.steam.library.analyzer.dto;
+package kosukeroku.steam.library.analyzer.modelDTO;
 
 import kosukeroku.steam.library.analyzer.service.SteamService;
 
