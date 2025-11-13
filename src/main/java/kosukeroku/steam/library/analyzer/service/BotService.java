@@ -1,9 +1,6 @@
 package kosukeroku.steam.library.analyzer.service;
 
-import kosukeroku.steam.library.analyzer.modelDTO.AchievementStats;
-import kosukeroku.steam.library.analyzer.modelDTO.FriendGameStats;
-import kosukeroku.steam.library.analyzer.modelDTO.GameStats;
-import kosukeroku.steam.library.analyzer.modelDTO.SteamGame;
+import kosukeroku.steam.library.analyzer.modelDTO.*;
 import kosukeroku.steam.library.analyzer.exception.SteamApiException;
 import kosukeroku.steam.library.analyzer.exception.SteamPrivateProfileException;
 import kosukeroku.steam.library.analyzer.exception.SteamUserNotFoundException;
@@ -64,11 +61,12 @@ public class BotService {
             List<SteamGame> topGames = steamService.getTopGamesByPlaytime(games);
             AchievementStats achievementStats = steamService.getAchievementStats(resolvedSteamId);
             List<FriendGameStats> friendGames = steamService.getPopularGamesAmongFriends(resolvedSteamId);
+            List<FriendGameOverlap> friendOverlap = steamService.getTopGameOverlaps(resolvedSteamId);
 
             String statsMessage = steamService.formatStatsMessage(stats, input, resolvedSteamId);
             String topGamesMessage = steamService.formatTopGamesMessage(topGames);
             String achievementMessage = steamService.formatAchievementMessage(achievementStats);
-            String friendGamesMessage = steamService.formatFriendGamesMessage(friendGames);
+            String friendGamesMessage = steamService.formatFriendGamesMessage(friendGames, friendOverlap);
 
             return statsMessage + LINE_SEPARATOR + "\n" + topGamesMessage + LINE_SEPARATOR + "\n" + achievementMessage + LINE_SEPARATOR + "\n" + friendGamesMessage;
 

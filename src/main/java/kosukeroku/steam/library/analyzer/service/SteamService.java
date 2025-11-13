@@ -1,14 +1,11 @@
 package kosukeroku.steam.library.analyzer.service;
 
 
-import kosukeroku.steam.library.analyzer.modelDTO.FriendGameStats;
+import kosukeroku.steam.library.analyzer.modelDTO.*;
 import kosukeroku.steam.library.analyzer.responseDTO.*;
 import kosukeroku.steam.library.analyzer.exception.SteamApiException;
 import kosukeroku.steam.library.analyzer.exception.SteamPrivateProfileException;
 import kosukeroku.steam.library.analyzer.exception.SteamUserNotFoundException;
-import kosukeroku.steam.library.analyzer.modelDTO.AchievementStats;
-import kosukeroku.steam.library.analyzer.modelDTO.GameStats;
-import kosukeroku.steam.library.analyzer.modelDTO.SteamGame;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -27,6 +24,8 @@ public class SteamService {
     private static final int VANITY_NOT_FOUND = 42; // returned code if vanity url was not found
     private static final int GAMES_IN_OUTPUT = 5;
     private static final int ACHIEVEMENTS_IN_OUTPUT = 3;
+    private static final int OVERLAPS_IN_OUTPUT = 3;
+    private static final int FRIENDS_IN_OUTPUT = 3;
 
     @Value("${steam.api.key:}")
     private String steamApiKey;
@@ -79,12 +78,39 @@ public class SteamService {
         }
     }
 
+    private String getPlayerName(String steamId) {
+        try {
+            SteamPlayerSummariesResponse response = webClient.get()
+                    .uri(uriBuilder -> uriBuilder
+                            .path("/ISteamUser/GetPlayerSummaries/v2/")
+                            .queryParam("key", steamApiKey)
+                            .queryParam("steamids", steamId)
+                            .build())
+                    .retrieve()
+                    .bodyToMono(SteamPlayerSummariesResponse.class)
+                    .block();
+
+            if (response != null &&
+                    response.response() != null &&
+                    response.response().players() != null &&
+                    !response.response().players().isEmpty()) {
+
+                return response.response().players().get(0).personaName();
+            }
+        } catch (Exception e) {
+            log.debug("Could not fetch name for user {}: {}", steamId, e.getMessage());
+        }
+        return "Unknown user";
+    }
+
     public List<SteamGame> getGames(String steamId) {
         SteamOwnedGamesResponse response = getGamesResponse(steamId);
         return response.response().games();
     }
 
-    // gets basic overall stats for an account
+    /// //////////////////////////////////////////////
+    // BASIC OVERALL STATS SECTION
+    /// //////////////////////////////////////////////
     public GameStats getOverallStats(List<SteamGame> games) {
         log.info("Calculating overall stats {} games", games.size());
 
@@ -140,14 +166,9 @@ public class SteamService {
 
     public String formatStatsMessage(GameStats stats, String originalInput, String resolvedSteamId) {
         StringBuilder message = new StringBuilder();
+        String userNickname = getPlayerName(resolvedSteamId);
 
-        // showing both steamID and custom name if the latter was used, and only steamID otherwise
-        if (!originalInput.equals(resolvedSteamId)) {
-            message.append("👤 *User:* ").append(originalInput)
-                    .append(" (SteamID: ").append(resolvedSteamId).append(")\n\n");
-        } else {
-            message.append("👤 *SteamID:* ").append(resolvedSteamId).append("\n\n");
-        }
+        message.append("👤 *User:* ").append(userNickname).append(" (SteamID: ").append(resolvedSteamId).append(")\n\n");
 
         message.append(String.format("""
         📊 *Overall Stats:*
@@ -163,6 +184,12 @@ public class SteamService {
         return message.toString();
     }
 
+
+
+
+    /// //////////////////////////////////////////////
+    // GAMES BY PLAYTIME SECTION
+    /// //////////////////////////////////////////////
     public List<SteamGame> getTopGamesByPlaytime(List<SteamGame> games) {
         log.info("Getting top games from {} total games", games.size());
 
@@ -195,6 +222,9 @@ public class SteamService {
         return message.toString();
     }
 
+    /// //////////////////////////////////////////////
+    // ACHIEVEMENT SECTION
+    /// //////////////////////////////////////////////
     // utility records...
     public record AchievementData(String gameName, int totalAchievements, int completedAchievements, boolean isPerfect, List<SteamAchievementsResponse.GameAchievement> allAchievements) {}
 
@@ -436,6 +466,11 @@ public class SteamService {
         return value + " " + unit + (value > 1 ? "s" : "") + " ago";
     }
 
+
+    /// //////////////////////////////////////////////
+    // FRIENDS SECTION
+    /// //////////////////////////////////////////////
+
     // utility record for aggregating friends' stats by game
     private record GameAggregate(String gameName, int friendCount, int totalPlaytime) {}
 
@@ -469,9 +504,6 @@ public class SteamService {
         }
         return Collections.emptyList();
     }
-
-
-
 
 
 
@@ -551,7 +583,110 @@ public class SteamService {
                 .collect(Collectors.toList());
     }
 
-    public String formatFriendGamesMessage(List<FriendGameStats> friendGames) {
+
+
+    // returns a map 'steamID -> nickname'
+    private Map<String, String> getFriendNames(List<String> friendIds) {
+        if (friendIds.isEmpty()) return Collections.emptyMap();
+
+        try {
+
+            // merging all friends' IDs into a single string for an API request
+            String steamIds = String.join(",", friendIds);
+            log.info("Friends' SteamIDs in a single string: {}", steamIds);
+
+            SteamPlayerSummariesResponse response = webClient.get()
+                    .uri(uriBuilder -> uriBuilder
+                            .path("/ISteamUser/GetPlayerSummaries/v2/")
+                            .queryParam("key", steamApiKey)
+                            .queryParam("steamids", steamIds)
+                            .build())
+                    .retrieve()
+                    .bodyToMono(SteamPlayerSummariesResponse.class)
+                    .block();
+
+            if (response != null && response.response() != null && response.response().players() != null) {
+                return response.response().players().stream()
+                        .collect(Collectors.toMap(
+                                SteamPlayerSummariesResponse.Player::steamId,
+                                SteamPlayerSummariesResponse.Player::personaName
+                        ));
+            }
+        } catch (Exception e) {
+            log.debug("Could not fetch friend names: {}", e.getMessage());
+        }
+
+        return Collections.emptyMap();
+    }
+
+    // calculates shared games info for one friend
+    private FriendGameOverlap calculateOverlapWithFriend(String friendId, Map<String, String> friendNames, Set<Long> myGameIds, List<SteamGame> myGames) {
+        try {
+            // getting friend's games
+            List<SteamGame> friendGames = getGames(friendId);
+            Set<Long> friendGameIds = friendGames.stream()
+                    .map(SteamGame::appId)
+                    .collect(Collectors.toSet());
+
+            // finding shared games
+            Set<Long> sharedGameIds = new HashSet<>(myGameIds);
+            sharedGameIds.retainAll(friendGameIds); // keeping only shared games
+
+            // getting most played shared games
+            List<String> sampleGames = myGames.stream()
+                    .filter(game -> sharedGameIds.contains(game.appId()))
+                    .sorted(Comparator.comparing(SteamGame::playtime).reversed())
+                    .map(SteamGame::name)
+                    .limit(FRIENDS_IN_OUTPUT)
+                    .collect(Collectors.toList());
+
+            // getting friend's name from the map
+            String friendName = friendNames.getOrDefault(friendId, "Friend");
+
+            return new FriendGameOverlap(friendName, friendId, sharedGameIds.size(), sampleGames);
+
+        } catch (Exception e) {
+            log.debug("Could not calculate overlap with friend {}: {}", friendId, e.getMessage());
+            return new FriendGameOverlap("Friend", friendId, 0, Collections.emptyList());
+        }
+    }
+
+
+    public List<FriendGameOverlap> getTopGameOverlaps(String steamId) {
+        log.info("Calculating game overlaps for SteamID: {}", steamId);
+
+        // getting user's games
+        List<SteamGame> myGames = getGames(steamId);
+        Set<Long> myGameIds = myGames.stream()
+                .map(SteamGame::appId)
+                .collect(Collectors.toSet());
+
+        // getting user's friends' IDs
+        List<String> friendIds = getFriendIds(steamId);
+        if (friendIds == null || friendIds.isEmpty()) {
+            return Collections.emptyList();
+        }
+
+        // getting user's friends' nicknames
+        Map<String, String> friendNames = getFriendNames(friendIds);
+
+        // finding shared games for each of the friends
+        List<FriendGameOverlap> overlaps = friendIds.parallelStream()
+                .map(friendId -> calculateOverlapWithFriend(
+                        friendId,
+                        friendNames,
+                        myGameIds,
+                        myGames
+                ))
+                .sorted(Comparator.comparingInt(FriendGameOverlap::sharedGamesCount).reversed())
+                .limit(FRIENDS_IN_OUTPUT)
+                .collect(Collectors.toList());
+
+        return overlaps;
+    }
+
+
+    public String formatFriendGamesMessage(List<FriendGameStats> friendGames, List<FriendGameOverlap> overlaps) {
 
         // if the friend list is hidden, then the list that this method accepts will only have one element, so we can
         // get the first element and check the value of its 'hidden' field
@@ -588,7 +723,23 @@ public class SteamService {
             ));
         }
 
+        if (!overlaps.isEmpty()) {
+            message.append("\n🎮 *Games You Share:*\n\n");
+
+            for (FriendGameOverlap overlap : overlaps) {
+                String gamesSample = String.join(", ", overlap.sampleGames());
+                message.append(String.format(
+                        "• With *%s*: %d games _(Most played are: %s)_\n",
+                        overlap.friendName(),
+                        overlap.sharedGamesCount(),
+                        gamesSample
+                ));
+            }
+
+        }
+
         return message.toString();
     }
+
 }
 
