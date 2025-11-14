@@ -57,16 +57,19 @@ public class BotService {
             List<SteamGame> games = steamService.getGames(resolvedSteamId);
 
 
+            String nickname = steamService.getPlayerName(resolvedSteamId);
             GameStats stats = steamService.getOverallStats(games);
             List<SteamGame> topGames = steamService.getTopGamesByPlaytime(games);
             AchievementStats achievementStats = steamService.getAchievementStats(resolvedSteamId);
             List<FriendGameStats> friendGames = steamService.getPopularGamesAmongFriends(resolvedSteamId);
             List<FriendGameOverlap> friendOverlap = steamService.getTopGameOverlaps(resolvedSteamId);
+            List<FriendAchievementLeaderboard> leaderboard = steamService.getAchievementLeaderboard(resolvedSteamId);
+
 
             String statsMessage = steamService.formatStatsMessage(stats, input, resolvedSteamId);
             String topGamesMessage = steamService.formatTopGamesMessage(topGames);
             String achievementMessage = steamService.formatAchievementMessage(achievementStats);
-            String friendGamesMessage = steamService.formatFriendGamesMessage(friendGames, friendOverlap);
+            String friendGamesMessage = steamService.formatFriendGamesMessage(friendGames, friendOverlap, leaderboard, achievementStats, nickname);
 
             return statsMessage + LINE_SEPARATOR + "\n" + topGamesMessage + LINE_SEPARATOR + "\n" + achievementMessage + LINE_SEPARATOR + "\n" + friendGamesMessage;
 

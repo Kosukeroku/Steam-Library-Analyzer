@@ -25,7 +25,9 @@ public class SteamService {
     private static final int GAMES_IN_OUTPUT = 5;
     private static final int ACHIEVEMENTS_IN_OUTPUT = 3;
     private static final int OVERLAPS_IN_OUTPUT = 3;
-    private static final int FRIENDS_IN_OUTPUT = 3;
+    private static final int FRIENDS_IN_SHARING_OUTPUT = 3;
+    private static final int FRIENDS_IN_LEADERBOARD_OUTPUT = 5;
+    private static final int MINIMUM_HOURS_FOR_STATS = 10;
 
     @Value("${steam.api.key:}")
     private String steamApiKey;
@@ -78,7 +80,7 @@ public class SteamService {
         }
     }
 
-    private String getPlayerName(String steamId) {
+    public String getPlayerName(String steamId) {
         try {
             SteamPlayerSummariesResponse response = webClient.get()
                     .uri(uriBuilder -> uriBuilder
@@ -283,7 +285,7 @@ public class SteamService {
 
         List<SteamGame> playedGames = games.stream()
                 .filter(game -> game.playtime() > 0)
-                .collect(Collectors.toList());
+                .toList();
 
         log.info("Processing {} played games for achievements", playedGames.size());
 
@@ -314,7 +316,7 @@ public class SteamService {
         List<AchievementData> achievementData = playedGames.parallelStream()
                 .map(game -> getAchievementData(steamId, game))
                 .filter(data -> data.totalAchievements > 0)
-                .collect(Collectors.toList());
+                .toList();
 
         // sorting by completion percentage
         List<AchievementData> topByProgress = achievementData.stream()
@@ -506,6 +508,39 @@ public class SteamService {
     }
 
 
+    // returns a map 'steamID -> nickname'
+    private Map<String, String> getFriendNames(List<String> friendIds) {
+        if (friendIds.isEmpty()) return Collections.emptyMap();
+
+        try {
+
+            // merging all friends' IDs into a single string for an API request
+            String steamIds = String.join(",", friendIds);
+            log.info("Friends' SteamIDs in a single string: {}", steamIds);
+
+            SteamPlayerSummariesResponse response = webClient.get()
+                    .uri(uriBuilder -> uriBuilder
+                            .path("/ISteamUser/GetPlayerSummaries/v2/")
+                            .queryParam("key", steamApiKey)
+                            .queryParam("steamids", steamIds)
+                            .build())
+                    .retrieve()
+                    .bodyToMono(SteamPlayerSummariesResponse.class)
+                    .block();
+
+            if (response != null && response.response() != null && response.response().players() != null) {
+                return response.response().players().stream()
+                        .collect(Collectors.toMap(
+                                SteamPlayerSummariesResponse.Player::steamId,
+                                SteamPlayerSummariesResponse.Player::personaName
+                        ));
+            }
+        } catch (Exception e) {
+            log.debug("Could not fetch friend names: {}", e.getMessage());
+        }
+
+        return Collections.emptyMap();
+    }
 
     public List<FriendGameStats> getPopularGamesAmongFriends(String steamId) {
         log.info("Getting popular games among friends for SteamID: {}", steamId);
@@ -571,6 +606,7 @@ public class SteamService {
                             false
                     );
                 })
+                .filter(stats -> stats.avgPlaytimeHours() > MINIMUM_HOURS_FOR_STATS)
                 .sorted((s1, s2) -> {
                     int compare = s2.friendCount() - s1.friendCount();
                     if (compare != 0) {
@@ -584,40 +620,6 @@ public class SteamService {
     }
 
 
-
-    // returns a map 'steamID -> nickname'
-    private Map<String, String> getFriendNames(List<String> friendIds) {
-        if (friendIds.isEmpty()) return Collections.emptyMap();
-
-        try {
-
-            // merging all friends' IDs into a single string for an API request
-            String steamIds = String.join(",", friendIds);
-            log.info("Friends' SteamIDs in a single string: {}", steamIds);
-
-            SteamPlayerSummariesResponse response = webClient.get()
-                    .uri(uriBuilder -> uriBuilder
-                            .path("/ISteamUser/GetPlayerSummaries/v2/")
-                            .queryParam("key", steamApiKey)
-                            .queryParam("steamids", steamIds)
-                            .build())
-                    .retrieve()
-                    .bodyToMono(SteamPlayerSummariesResponse.class)
-                    .block();
-
-            if (response != null && response.response() != null && response.response().players() != null) {
-                return response.response().players().stream()
-                        .collect(Collectors.toMap(
-                                SteamPlayerSummariesResponse.Player::steamId,
-                                SteamPlayerSummariesResponse.Player::personaName
-                        ));
-            }
-        } catch (Exception e) {
-            log.debug("Could not fetch friend names: {}", e.getMessage());
-        }
-
-        return Collections.emptyMap();
-    }
 
     // calculates shared games info for one friend
     private FriendGameOverlap calculateOverlapWithFriend(String friendId, Map<String, String> friendNames, Set<Long> myGameIds, List<SteamGame> myGames) {
@@ -637,7 +639,7 @@ public class SteamService {
                     .filter(game -> sharedGameIds.contains(game.appId()))
                     .sorted(Comparator.comparing(SteamGame::playtime).reversed())
                     .map(SteamGame::name)
-                    .limit(FRIENDS_IN_OUTPUT)
+                    .limit(FRIENDS_IN_SHARING_OUTPUT)
                     .collect(Collectors.toList());
 
             // getting friend's name from the map
@@ -671,7 +673,7 @@ public class SteamService {
         Map<String, String> friendNames = getFriendNames(friendIds);
 
         // finding shared games for each of the friends
-        List<FriendGameOverlap> overlaps = friendIds.parallelStream()
+        return friendIds.parallelStream()
                 .map(friendId -> calculateOverlapWithFriend(
                         friendId,
                         friendNames,
@@ -679,16 +681,62 @@ public class SteamService {
                         myGames
                 ))
                 .sorted(Comparator.comparingInt(FriendGameOverlap::sharedGamesCount).reversed())
-                .limit(FRIENDS_IN_OUTPUT)
+                .limit(FRIENDS_IN_SHARING_OUTPUT)
                 .collect(Collectors.toList());
+    }
 
-        return overlaps;
+    public List<FriendAchievementLeaderboard> getAchievementLeaderboard(String steamId) {
+        log.info("Building achievement leaderboard for SteamID: {}", steamId);
+
+        List<String> friendIds = getFriendIds(steamId);
+        if (friendIds == null) {
+            return Collections.emptyList(); // friends are hidden
+        }
+
+        // adding user's ID to a list of their friends' IDs
+        List<String> allUsers = new ArrayList<>(friendIds);
+        allUsers.add(steamId);
+
+        Map<String, String> userNames = getFriendNames(allUsers);
+
+
+        return allUsers.parallelStream()
+                .map(userId -> {
+                    try {
+                        AchievementStats achievementStats = getAchievementStats(userId);
+
+                        String name = userNames.getOrDefault(userId, "Unknown");
+                        boolean isCurrentUser = userId.equals(steamId); // if the current processed ID is user's, set this to true for further processing
+
+                        return new FriendAchievementLeaderboard(
+                                name,
+                                userId,
+                                achievementStats.completedAchievements(),
+                                isCurrentUser
+                        );
+                    } catch (SteamPrivateProfileException e) {
+                        log.debug("Private profile for {}: {}", userId, e.getMessage());
+                        return new FriendAchievementLeaderboard(
+                                userNames.getOrDefault(userId, "Private Profile"),
+                                userId, 0, false
+                        );
+                    } catch (Exception e) {
+                        log.debug("Could not fetch achievements for user {}: {}", userId, e.getMessage());
+                        return new FriendAchievementLeaderboard(
+                                userNames.getOrDefault(userId, "Unknown"),
+                                userId, 0, false
+                        );
+                    }
+                })
+                .sorted(Comparator.comparingInt(FriendAchievementLeaderboard::totalAchievements).reversed())
+                .limit(FRIENDS_IN_LEADERBOARD_OUTPUT)
+                .collect(Collectors.toList());
     }
 
 
-    public String formatFriendGamesMessage(List<FriendGameStats> friendGames, List<FriendGameOverlap> overlaps) {
+    public String formatFriendGamesMessage(List<FriendGameStats> friendGames, List<FriendGameOverlap> overlaps, List<FriendAchievementLeaderboard> leaderboard, AchievementStats userAchievementStats, String nickname) {
 
-        // if the friend list is hidden, then the list that this method accepts will only have one element, so we can
+        // if the friend list is hidden, then the friend games list that this method accepts will only have one element, so we can
         // get the first element and check the value of its 'hidden' field
         boolean isFriendsHidden = !friendGames.isEmpty() && friendGames.get(0).hidden();
 
@@ -736,6 +784,35 @@ public class SteamService {
                 ));
             }
 
+        }
+
+        if (!leaderboard.isEmpty()) {
+            message.append("\n🏅 *Achievement Leaderboard (only friends with public achievement info):*\n\n");
+
+            String[] medals = {"🥇", "🥈", "🥉"};
+
+            for (int i = 0; i < leaderboard.size(); i++) {
+                FriendAchievementLeaderboard entry = leaderboard.get(i);
+                String medal = i < 3 ? medals[i] : (i + 1) + "."; // adding medals for places 1-3, and simple dot for others
+                String name = entry.isCurrentUser() ? "👤*" + entry.friendName() + "*" : entry.friendName();
+
+
+                message.append(String.format(
+                        "%s %s - %,d achievements\n",
+                        medal, name, entry.totalAchievements()
+                ));
+            }
+        }
+        boolean currentUserInLeaderboard = leaderboard.stream()
+                .anyMatch(FriendAchievementLeaderboard::isCurrentUser);
+
+        if (!currentUserInLeaderboard && userAchievementStats != null) {
+            message.append("............\n");
+            message.append(String.format(
+                    "👤 *%s* - %,d achievements",
+                    nickname,
+                    userAchievementStats.completedAchievements()
+            ));
         }
 
         return message.toString();
