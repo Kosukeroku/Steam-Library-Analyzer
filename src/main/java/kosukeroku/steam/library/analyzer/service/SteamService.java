@@ -203,15 +203,22 @@ public class SteamService {
 
     }
 
-    public String formatTopGamesMessage(List<SteamGame> topGames) {
+    public String formatTopGamesMessage(List<SteamGame> topGames, String mode) {
+        if (topGames.isEmpty()) {
+            return "🎮 *No games with playtime found*";
+        }
+
         StringBuilder message = new StringBuilder();
 
         message.append("🎮 *Top ").append(GAMES_IN_OUTPUT).append(" games by playtime:*\n\n");
 
         for (int i = 0; i < topGames.size(); i++) {
             SteamGame game = topGames.get(i);
-            int hours = game.playtime() / 60;
-            int minutes = game.playtime() % 60;
+
+            int totalMinutes = mode.equals("all_time") ? game.playtime() : game.playtime_2weeks();
+
+            int hours = totalMinutes / 60;
+            int minutes = totalMinutes % 60;
 
             String timeString = hours > 0 ?
                     String.format("%d h %d min", hours, minutes) :
@@ -817,6 +824,29 @@ public class SteamService {
 
         return message.toString();
     }
+
+    /// ////////////////////////////////////////////////////////////////////////////
+    // GAMES BY PLAYTIME IN LAST 2 WEEKS
+    /// ///////////////////////////////////////////////////////////////////////////
+    public List<SteamGame> getRecentGames(String steamId) {
+        SteamOwnedGamesResponse response = getGamesResponse(steamId);
+
+        // filtering games with playtime in the last 2 weeks
+        return response.response().games().stream()
+                .filter(game -> game.playtime_2weeks() != null && game.playtime_2weeks() > 0) // steam api returns null if the game was not played, so we need an explicit non-null check first
+                .collect(Collectors.toList());
+    }
+
+    public List<SteamGame> getTopRecentGamesByPlaytime(List<SteamGame> games) {
+        log.info("Getting top recent games from {} total recent games", games.size());
+
+        return games.stream()
+                .sorted(Comparator.comparing(SteamGame::playtime_2weeks).reversed())
+                .limit(GAMES_IN_OUTPUT)
+                .collect(Collectors.toList());
+    }
+
+
 
 }
 

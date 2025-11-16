@@ -95,23 +95,35 @@ public class LibraryAnalyzerBot extends TelegramLongPollingBot {
         InlineKeyboardMarkup markup = new InlineKeyboardMarkup();
         List<List<InlineKeyboardButton>> rows = new ArrayList<>();
 
-        // first row: overall stats
+
         List<InlineKeyboardButton> row1 = new ArrayList<>();
         row1.add(InlineKeyboardButton.builder()
-                .text("🎮 Top Games")
+                .text("🎮 Most Played All Time")
                 .callbackData("top_games")
                 .build());
-        row1.add(InlineKeyboardButton.builder()
+
+        List<InlineKeyboardButton> row2 = new ArrayList<>();
+        row2.add(InlineKeyboardButton.builder()
+                .text("🎮 Most Played 2 Weeks")
+                .callbackData("recent_games")
+                .build());
+
+        List<InlineKeyboardButton> row3 = new ArrayList<>();
+        row3.add(InlineKeyboardButton.builder()
                 .text("🏆 Achievements")
                 .callbackData("achievements")
                 .build());
-        row1.add(InlineKeyboardButton.builder()
+
+        List<InlineKeyboardButton> row4 = new ArrayList<>();
+        row4.add(InlineKeyboardButton.builder()
                 .text("👥 Friends Stats")
                 .callbackData("friends")
                 .build());
 
-
         rows.add(row1);
+        rows.add(row2);
+        rows.add(row3);
+        rows.add(row4);
         markup.setKeyboard(rows);
 
         return markup;

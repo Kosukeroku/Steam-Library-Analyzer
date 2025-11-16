@@ -37,8 +37,8 @@ I'll show you:
 `76561197960287930`
 `gabelogannewell`
 
-💡 _To find your Steam ID: Click your username → "Account details"_
-💡 _To find custom URL: Click your username → "Profile" → "Edit Profile"_
+💡 _To find your Steam ID, click your username in the top right corner of the Steam client or website and select "Account details".
+💡 To find your custom Steam profile URL, click on your username in the top right, select "Profile" or "View my profile", then click "Edit Profile". Your custom URL is located under the "General" tab._
 """;
 
     // shows the welcome message for the '/start' command and initiates the processing in the method below in other cases
@@ -97,7 +97,13 @@ I'll show you:
                 case "top_games":
                     List<SteamGame> games = steamService.getGames(steamId);
                     List<SteamGame> topGames = steamService.getTopGamesByPlaytime(games);
-                    result = steamService.formatTopGamesMessage(topGames);
+                    result = steamService.formatTopGamesMessage(topGames, "all_time");
+                    break;
+
+                case "recent_games":
+                    List<SteamGame> recentGames = steamService.getRecentGames(steamId);
+                    List<SteamGame> topRecentGames = steamService.getTopRecentGamesByPlaytime(recentGames);
+                    result = steamService.formatTopGamesMessage(topRecentGames, "recent");
                     break;
 
                 case "achievements":
@@ -112,6 +118,7 @@ I'll show you:
                     AchievementStats achievementStatsForFriends = steamService.getAchievementStats(steamId);
                     result = steamService.formatFriendGamesMessage(friendGames, friendOverlap, leaderboard, achievementStatsForFriends, nickname);
                     break;
+
 
                 default:
                     return "❌ Unknown command.";
