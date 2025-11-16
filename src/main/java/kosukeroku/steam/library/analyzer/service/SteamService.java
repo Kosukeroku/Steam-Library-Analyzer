@@ -166,7 +166,7 @@ public class SteamService {
         }
     }
 
-    public String formatStatsMessage(GameStats stats, String originalInput, String resolvedSteamId) {
+    public String formatStatsMessage(GameStats stats, String resolvedSteamId) {
         StringBuilder message = new StringBuilder();
         String userNickname = getPlayerName(resolvedSteamId);
 
