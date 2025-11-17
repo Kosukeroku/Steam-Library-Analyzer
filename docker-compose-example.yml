@@ -1,0 +1,23 @@
+services:
+  redis:
+    image: redis:alpine
+    restart: unless-stopped
+
+    volumes:
+      - redis_data:/data
+
+  bot:
+    build: .
+    environment:
+      - SPRING_DATA_REDIS_HOST=redis
+      - TELEGRAM_BOT_TOKEN=telegram_bot_token_here
+      - TELEGRAM_BOT_USERNAME=telegram_bot_username_here
+      - STEAM_API_KEY=steam_api_key_here
+    ports:
+      - "8080:8080"
+    depends_on:
+      - redis
+    restart: unless-stopped
+
+volumes:
+  redis_data:
