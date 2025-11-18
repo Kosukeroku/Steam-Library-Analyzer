@@ -210,7 +210,10 @@ public class SteamService {
 
         StringBuilder message = new StringBuilder();
 
-        message.append("🎮 *Top ").append(GAMES_IN_OUTPUT).append(" games by playtime:*\n\n");
+        message.append("🎮 *Top ").append(GAMES_IN_OUTPUT).append(" games by playtime*");
+
+        String add = mode.equals("all_time") ? "*:*\n\n" : " *in 2 weeks*:\n\n";
+        message.append(add);
 
         for (int i = 0; i < topGames.size(); i++) {
             SteamGame game = topGames.get(i);
