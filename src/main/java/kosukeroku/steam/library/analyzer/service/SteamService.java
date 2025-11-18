@@ -291,7 +291,7 @@ public class SteamService {
         List<SteamGame> games = response.response().games();
 
         List<SteamGame> playedGames = games.stream()
-                .filter(game -> game.playtime() > 0)
+                .filter(game -> game.playtime() > 30)
                 .toList();
 
         log.info("Processing {} played games for achievements", playedGames.size());
