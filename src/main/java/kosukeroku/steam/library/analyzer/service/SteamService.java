@@ -97,7 +97,7 @@ public class SteamService {
                     response.response().players() != null &&
                     !response.response().players().isEmpty()) {
 
-                return response.response().players().get(0).personaName();
+                return escapeMarkdown(response.response().players().get(0).personaName());
             }
         } catch (Exception e) {
             log.debug("Could not fetch name for user {}: {}", steamId, e.getMessage());
@@ -325,7 +325,7 @@ public class SteamService {
 
         List<AchievementData> achievementData = playedGames.parallelStream()
                 .map(game -> getAchievementData(steamId, game))
-                .filter(data -> data.totalAchievements > 0)
+                .filter(data -> data.totalAchievements > 1)
                 .toList();
 
         // sorting by completion percentage
@@ -767,6 +767,8 @@ public class SteamService {
             return "";
         }
 
+        String safeNickname = escapeMarkdown(nickname);
+
         StringBuilder message = new StringBuilder();
         message.append("👥 *Popular Among Friends:*\n\n");
 
@@ -786,9 +788,10 @@ public class SteamService {
 
             for (FriendGameOverlap overlap : overlaps) {
                 String gamesSample = String.join(", ", overlap.sampleGames());
+                String safeFriendName = escapeMarkdown(overlap.friendName());
                 message.append(String.format(
                         "• With *%s*: %d games _(Most played are: %s)_\n",
-                        overlap.friendName(),
+                        safeFriendName,
                         overlap.sharedGamesCount(),
                         gamesSample
                 ));
@@ -820,12 +823,35 @@ public class SteamService {
             message.append("............\n");
             message.append(String.format(
                     "👤 *%s* - %,d achievements",
-                    nickname,
+                    safeNickname,
                     userAchievementStats.completedAchievements()
             ));
         }
 
         return message.toString();
+    }
+
+    private String escapeMarkdown(String text) {
+        if (text == null) return "";
+
+        return text.replace("_", "\\_")
+                .replace("*", "\\*")
+                .replace("[", "\\[")
+                .replace("]", "\\]")
+                .replace("(", "\\(")
+                .replace(")", "\\)")
+                .replace("~", "\\~")
+                .replace("`", "\\`")
+                .replace(">", "\\>")
+                .replace("#", "\\#")
+                .replace("+", "\\+")
+                .replace("-", "\\-")
+                .replace("=", "\\=")
+                .replace("|", "\\|")
+                .replace("{", "\\{")
+                .replace("}", "\\}")
+                .replace(".", "\\.")
+                .replace("!", "\\!");
     }
 
     /// ////////////////////////////////////////////////////////////////////////////
