@@ -1,3 +1,5 @@
+_README in English: https://github.com/Kosukeroku/Steam-Library-Analyzer/blob/master/README.md_
+
 # Steam Library Analyzer Bot — t.me/SteamLibraryAnalyzerBot
 ## _Телеграм-бот для анализа библиотек Steam. Узнайте статистику по играм, информацию по достижениям и сравните себя с друзьями!_
 
