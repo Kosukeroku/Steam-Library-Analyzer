@@ -1,3 +1,5 @@
+_README in Russian: https://github.com/Kosukeroku/Steam-Library-Analyzer/blob/master/README-ru.md_
+
 # **Steam Library Analyzer Bot — t.me/SteamLibraryAnalyzerBot**
 ## _Telegram bot for analyzing Steam libraries. Get game stats, achivement info and compare yourself with your Steam friends!_
 
